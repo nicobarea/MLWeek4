@@ -1,0 +1,105 @@
+---
+title: "Practical Machine Learning - Exercise Prediction"
+author: "Nicolas Barea"
+date: "26/12/2020"
+output: 
+  html_document: 
+    keep_md: yes
+editor_options: 
+  chunk_output_type: inline
+---
+# Predicting weight lifting mistakes
+
+## Introduction
+
+Based on the data collected from six male participants with little weightlifting experience. They were asked to perform ten repetitions with a 1.25kg weight, in this five different ways:
+
+-Class A: Exactly according to the specification.
+-Class B: Throwing the elbows to the front.
+-Class C: Lifting the dumbbell only halfway.
+-Class D: Lowering the dumbbell only halfway.
+-Class E: Throwing the hips to the front.
+
+The goal of this analysis is to create a model than can predict the "Class" of the exercise based on the metrics collected. 
+
+I downloaded two datasets, one called `train` with 19622 observations and 159 variables. I split the dataset into a `trainTrain` one with 75% of the observations which I will use to train the model, and another one called `trainTest`to perform cross validation and assess accuracy.
+
+The `classe` that is the target of the prediction has to be converted to a factor for the classification algorithms to work:
+
+```{r data, echo=TRUE}
+library(caret)
+library(ggplot2)
+
+#Download data
+train<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                        sep=",",head=T,row.names=1)
+test<-read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                       sep=",",head=T,row.names=1)
+
+set.seed(123)
+
+#Break up the train data into a train and test sets for cross validation
+inTrain = createDataPartition(train$classe, p = 3/4,list = FALSE)
+trainTrain = train[inTrain,]
+trainTest = train[-inTrain,]
+
+#Make Classe a factor
+trainTrain$classe<-as.factor(trainTrain$classe)
+trainTest$classe<-as.factor(trainTest$classe)
+```
+
+## Data exploration - Dropping variables.
+
+We have 158 potential predictors in our data. The `nearzeroVar` function in the Caret package in R diagnoses predictors that have one unique value (i.e. are zero variance predictors) or predictors that are have both of the following characteristics: they have very few unique values relative to the number of samples and the ratio of the frequency of the most common value to the frequency of the second most common value is large. I ran `nearzeroVar` in the `trainTrain` dataset and eliminated the variables that would add no information to the prediction model.
+
+I eliminate the same variables from the `trainTest` dataset.
+
+Many variables have a significant proportion of `NA` values, I eliminate from the datasets the one with more than 50% of them.
+
+```{r variables drop, echo=FALSE}
+#Net zero value variable drop
+nzv<-nearZeroVar(trainTrain,saveMetrics = TRUE)
+trainTrain<-trainTrain[,-which(nzv$nzv=="TRUE")]
+trainTest<-trainTest[,-which(nzv$nzv=="TRUE")]
+
+#Drop predictors with more than 50% NA values
+ridofNA<-which(colMeans(is.na(trainTrain))>0.5)
+trainTrain<-trainTrain[,-ridofNA]
+trainTest<-trainTest[,-ridofNA]
+```
+
+The resulting dataset includes 58 variables.
+
+## Model fit using Gradient Boosting Machine
+
+Our training set still has 57 predicting variables, so it will be a complex model. Boosting helps reduce variance and bias. The algorithm helps in the conversion of weak learners into strong learners by combining multiple number of learners.
+
+I will use the Gradient Boosting Machine ("`gbm`" in the Caret package) algorithm to fit the model. 
+
+```{r model fit, echo=FALSE}
+modelGBM<-train(classe~.,data=trainTrain,method="gbm")
+summary(modelGBM)
+```
+
+Reviewing the summary of the model, we realize that 9 of the predictors have zero influence, which would allow us to simplify the model by eliminating them without any loss of information or predictive ability.
+
+## Prediction and Cross Validation
+
+Using the fitted model I generate a prediction using the `trainTest` data for Cross Validation purposes.
+
+```{r prediction, echo=TRUE}
+predGBM<-predict(modelGBM,newdata = trainTest)
+ConfMatrix<-confusionMatrix(predGBM,trainTest$classe)
+print(ConfMatrix)
+#plotdata<-data.frame(predGBM,trainTest$classe)
+#plot1<-ggplot(plotdata, aes(y=predGBM,x=trainTest$classe))+
+#    stat_sum(alpha=0.8)+scale_size(range=c(0,20))
+#finalplot<-plot1+geom_text(data = ggplot_build(plot1)$data[[1]], 
+#              aes(x, y, label = n), color = "white")
+#print(finalplot)
+```
+
+The Confusion Matrix including the actual values of `classe` in `trainTest` vs. the predicted values of our fitted model using GBM has an accuracy of 99.6%. 
+
+The plot also shows the consistent performance of the fitted model. 
+
